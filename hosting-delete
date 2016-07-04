@@ -1,0 +1,33 @@
+#!/bin/bash
+
+db_user="root"
+db_password=""
+
+##############################################
+# USER DELETION      
+##############################################
+
+user=`printf $2 | cut -c 1-16`
+userdel $user > /dev/null 2>&1
+rm -fr /home/$user
+
+htpasswd -D /etc/apache2/.htpasswd $user > /dev/null 2>&1
+
+##############################################
+# APACHE VIRTUAL HOST
+##############################################
+
+domain=$1
+domain_root=/var/www/vhosts/$domain
+
+rm -fr $domain_root > /dev/null 2>&1
+a2dissite $domain > /dev/null 2>&1
+service apache2 reload > /dev/null 2>&1
+rm -fr /etc/apache2/sites-available/${domain} > /dev/null 2>&1
+
+##############################################
+# DATABASE DELETION
+##############################################
+
+mysql --user=$db_user --password=$db_password --execute="DROP DATABASE $user;" > /dev/null 2>&1
+mysql --user=$db_user --password=$db_password --execute="DROP USER '$user'@'localhost';" > /dev/null 2>&1

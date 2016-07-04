@@ -1,0 +1,80 @@
+#!/bin/bash
+
+db_user="root"
+db_password=""
+
+##############################################
+# USER CREATION      
+##############################################
+
+user=`printf $2 | cut -c 1-16`
+user_password=`pwgen -cnsB1`
+
+mkdir -p /home/$user
+useradd -m -s /bin/bash $user > /dev/null 2>&1
+echo -e "$user_password\n$user_password\n" | passwd $user > /dev/null 2>&1
+chown $user:$user /home/$user
+
+user_apache2=`ps -ef | egrep '(httpd|apache2|apache)' | grep -v \`whoami\` | grep -v root | head -n1 | awk '{print $1}'`
+usermod -a -G $user_apache2 $user > /dev/null 2>&1
+usermod -a -G $user $user_apache2 > /dev/null 2>&1
+
+touch /etc/apache2/.htpasswd
+htpasswd -b /etc/apache2/.htpasswd $user $user_password > /dev/null 2>&1
+
+echo "USER: $user - PASSWORD: $user_password"
+
+##############################################
+# APACHE VIRTUAL HOST
+##############################################
+
+domain=$1
+domain_root=/var/www/vhosts/$domain
+domain_docroot=${domain_root}/httpdocs
+
+mkdir -p ${domain_root}/log
+mkdir -p $domain_docroot
+
+chown -R ${user_apache2}:${user_apache2} $domain_root
+chmod -R 0775 $domain_root
+
+cat > /etc/apache2/sites-available/${domain}.conf <<EOF
+<VirtualHost *:80>
+    ServerAdmin webmaster@$domain
+    ServerName $domain
+    DocumentRoot $domain_docroot
+    <Directory />
+      Options FollowSymLinks
+      AllowOverride None
+    </Directory>
+    <Directory $domain_docroot/>
+      Options FollowSymLinks MultiViews
+      AllowOverride All
+      Order allow,deny
+      allow from all
+
+      AuthType Basic
+      AuthName "Restricted Content"
+      AuthUserFile /etc/apache2/.htpasswd
+      Require valid-user
+    </Directory>
+    CustomLog $domain_root/log/access.log combined
+    ErrorLog $domain_root/log/error.log
+</VirtualHost>
+EOF
+
+a2ensite $domain > /dev/null 2>&1
+service apache2 reload > /dev/null 2>&1
+
+##############################################
+# DATABASE CREATION
+##############################################
+
+db_user_password=`pwgen -cnsB1`
+
+mysql --user=$db_user --password=$db_password --execute="CREATE USER '$user'@'localhost' IDENTIFIED BY '$db_user_password';" > /dev/null 2>&1
+mysql --user=$db_user --password=$db_password --execute="GRANT USAGE ON *.* TO  '$user'@'localhost' IDENTIFIED BY '$db_user_password' WITH MAX_QUERIES_PER_HOUR 0 MAX_CONNECTIONS_PER_HOUR 0 MAX_UPDATES_PER_HOUR 0 MAX_USER_CONNECTIONS 0;" > /dev/null 2>&1
+mysql --user=$db_user --password=$db_password --execute="CREATE DATABASE IF NOT EXISTS \`$user\`;" > /dev/null 2>&1
+mysql --user=$db_user --password=$db_password --execute="GRANT ALL PRIVILEGES ON \`$user\`.* TO '$user'@'localhost';" > /dev/null 2>&1
+
+echo "DB USER: $user - DB NAME: $user - DB PASSWORD: $db_user_password"
